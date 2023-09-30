@@ -361,7 +361,7 @@ def main() -> None:
         exit(0xFF)
 
     # Initialize the Pickle database
-    my_persistence = PicklePersistence(filepath='../db')
+    my_persistence = PicklePersistence(filepath='DB', update_interval=5)
 
     openai.api_key = keyring_get('OpenAI')
 
