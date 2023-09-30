@@ -5,10 +5,7 @@ logger = logging.getLogger(__name__)
 
 KEYRING = {
     'Telegram': None,
-    'OpenWeather': None,
-    'WitAI': None,
     'DevId': None,
-    'ApiNinja': None,
     'OpenAI': None
 }
 

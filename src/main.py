@@ -2,17 +2,21 @@ import html
 import json
 import logging
 import traceback
+import uuid
+from typing import Union
 from warnings import filterwarnings
 
-from telegram import Update
+import openai
+from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
+from telegram.error import BadRequest
 from telegram.ext import (
     Application,
     CommandHandler,
     ConversationHandler,
     MessageHandler,
     ContextTypes,
-    filters, CallbackQueryHandler
+    filters, CallbackQueryHandler, PicklePersistence
 )
 from telegram.warnings import PTBUserWarning
 
@@ -34,18 +38,280 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
+MODEL_CHOSE, CHAT, ACTIONS, CHAT_SELECTION = range(4)
 
-async def start_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+OPENAI_GPT3 = 'gpt-3.5-turbo'
+OPENAI_GPT4 = 'gpt-4'
+USER_DATA_KEY_HISTORY = 'ai_chat_conversation_history'
+USER_DATA_KEY_MODEL = 'model'
+USER_DATA_KEY_ID = 'id'
+USER_DATA_CURRENT_CHAT_ID = 'current_chat_id'
+
+
+# reply_keyboard = [['GTP-3.5 Turbo', 'GPT-4'], ['New chat', 'Delete chat']]
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
     The callback called when the bot receive the classical start command on a new conversation.
-    It calls db_get_chat from dbjson file to read the chat or initialize it
     """
-    chat_id = update.effective_message.chat_id
-    # db_get_chat(chat_id)
-    logger.info(f'Initialize chat file for chat_id: {chat_id}')
+    reply_keyboard = [['GTP-3.5 Turbo', 'GPT-4']]
 
-    welcome_text = "Hi! This will be a ChatGPT tg bot!"
-    await update.message.reply_text(welcome_text, parse_mode=ParseMode.MARKDOWN_V2)
+    await update.message.reply_text(
+        "Hi! This is a telegram bot which imitates the behaviour of ChatGPT."
+        "Please choose the model you want to use.",
+        reply_markup=ReplyKeyboardMarkup(
+            reply_keyboard, resize_keyboard=True, one_time_keyboard=True, input_field_placeholder='GPT-3.5 or GPT4?'
+        )
+    )
+
+    return MODEL_CHOSE
+
+
+async def actions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[
+    int, None]:
+    message = update.message.text
+
+    if message == 'New chat':
+        structure_single_chat = {
+            'title': None,
+            'model': None,
+            'history': []
+        }
+
+        # generate a new UUID for the new chat and assign it as key for the new chat history
+        new_uuid = str(uuid.uuid4())
+        context.user_data[USER_DATA_KEY_ID] = new_uuid
+
+        if context.user_data.get(USER_DATA_KEY_HISTORY, None):
+            context.user_data[USER_DATA_KEY_HISTORY][context.user_data[USER_DATA_KEY_ID]] = structure_single_chat
+        else:
+            context.user_data[USER_DATA_KEY_HISTORY] = {
+                context.user_data[USER_DATA_KEY_ID]: structure_single_chat.copy()
+            }
+
+        # save the model chose in the chat
+        context.user_data[USER_DATA_KEY_HISTORY][context.user_data[USER_DATA_KEY_ID]][USER_DATA_KEY_MODEL] = \
+            context.user_data[
+                USER_DATA_KEY_MODEL]
+
+        # save the current session to the just created chat
+        context.user_data[USER_DATA_CURRENT_CHAT_ID] = new_uuid
+
+        await update.message.reply_text("New chat created!\nPlease send a message to start the chat!")
+
+        return CHAT
+
+    elif message == 'Delete chat':
+        chat_history = context.user_data.get(USER_DATA_KEY_HISTORY, None)
+
+        if chat_history is not None and chat_history.get(context.user_data[USER_DATA_CURRENT_CHAT_ID],
+                                                         None) is not None:
+            del context.user_data[USER_DATA_KEY_HISTORY][context.user_data[USER_DATA_CURRENT_CHAT_ID]]
+
+            if len(context.user_data[USER_DATA_KEY_HISTORY]) > 0:  # If there are still chats left
+                reply_keyboard = [['GTP-3.5 Turbo', 'GPT-4'], ['Select a chat']]
+                await update.message.reply_text(
+                    "You've deleted the current chat.\nPlease select an old chat or create a new one by selecting the model.",
+                    reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True, one_time_keyboard=True)
+                )
+                return CHAT_SELECTION
+            else:  # If no chats left
+                reply_keyboard = [['GTP-3.5 Turbo', 'GPT-4']]
+                await update.message.reply_text(
+                    "You've deleted the current chat. Please start a new chat by selecting a model.",
+                    reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True, one_time_keyboard=True)
+                )
+                return MODEL_CHOSE
+
+        else:
+            reply_keyboard = [['GTP-3.5 Turbo', 'GPT-4']]
+            await update.message.reply_text(
+                "You're not in any chat. Please start a new one by selecting a model.",
+                reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True, one_time_keyboard=True)
+            )
+            return MODEL_CHOSE
+
+    elif message == 'Select a chat':
+        chat_history = context.user_data.get(USER_DATA_KEY_HISTORY, None)
+        if chat_history:
+            # Get the page number from user_data or default to 0
+            current_page = context.user_data.get('current_page', 0)
+
+            # Generate the keyboard for the current page
+            reply_markup = generate_chat_list_keyboard(chat_history, current_page)
+
+            await update.message.reply_text("Select a chat:", reply_markup=reply_markup)
+
+            return CHAT_SELECTION
+        else:
+            await update.message.reply_text("No chats available.")
+
+            return ACTIONS
+
+
+def generate_chat_list_keyboard(chat_history, page):
+    items_per_page = 6
+    keyboard = []
+
+    start_index = page * items_per_page
+    end_index = start_index + items_per_page
+
+    for chat_id in list(chat_history.keys())[start_index:end_index]:
+        # Assuming chat has a 'title' attribute, change it as per your structure
+        chat_title = chat_history[chat_id].get('title', chat_id)
+        keyboard.append([InlineKeyboardButton(chat_title, callback_data=f"select_chat:{chat_id}")])
+
+    # Add navigation buttons if necessary
+    if page > 0:
+        keyboard.append([InlineKeyboardButton("Previous", callback_data="prev_page")])
+    if end_index < len(chat_history):
+        keyboard.append([InlineKeyboardButton("Next", callback_data="next_page")])
+
+    return InlineKeyboardMarkup(keyboard)
+
+
+async def chat_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    # call again action function
+    return await actions(update, context)
+
+
+async def chat_selection_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[int, None]:
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    if data.startswith("select_chat:"):
+        chat_id = data.split(":")[1]
+        context.user_data[USER_DATA_CURRENT_CHAT_ID] = chat_id
+
+        reply_keyboard = [['New chat', 'Delete chat'], ['Select a chat']]
+
+        await context.bot.send_message(chat_id=query.from_user.id,
+                                       text=f"You have selected the conversation with title:\n"
+                                            f"{context.user_data[USER_DATA_KEY_HISTORY][context.user_data[USER_DATA_CURRENT_CHAT_ID]]['title']}"
+                                       , reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True,
+                                                                          resize_keyboard=True))
+
+        return CHAT
+
+    elif data == "prev_page":
+        context.user_data['current_page'] -= 1
+    elif data == "next_page":
+        context.user_data['current_page'] += 1
+
+    # Update the InlineKeyboard with the new page data
+    chat_history = context.user_data.get(USER_DATA_KEY_HISTORY, None)
+    current_page = context.user_data.get('current_page', 0)
+    reply_markup = generate_chat_list_keyboard(chat_history, current_page)
+    await query.edit_message_text("Select a chat:", reply_markup=reply_markup)
+
+
+async def model(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    Stores the model chose by the user
+    """
+    message = update.message.text
+    logger.info("User choosed model: %s", message)
+
+    reply_keyboard = [['New chat', 'Delete chat'], ['Select a chat']]
+
+    if message in ['GTP-3.5 Turbo', 'GPT-4']:
+        await update.message.reply_text(f"Ok, I will use {message} as model.\nPlease chose what to do:\n"
+                                        f"Do you want to start a new chat or finish an old one?",
+                                        reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True,
+                                                                         resize_keyboard=True,
+                                                                         input_field_placeholder='New chat or delete one chat?'))
+
+        context.user_data[USER_DATA_KEY_MODEL] = OPENAI_GPT3 if message == 'GTP-3.5 Turbo' else OPENAI_GPT4
+
+    return ACTIONS
+
+
+async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[int, None]:
+    """Manage the chat with the model"""
+    user_message = update.message.text
+
+    # change status of the chat if the message is new chat or some other command
+    if user_message in ['New chat', 'Delete chat', 'Select a chat']:
+        # Directly call the actions function and return the resulting state
+        return await actions(update, context)
+
+    if context.user_data[USER_DATA_KEY_HISTORY][context.user_data[USER_DATA_CURRENT_CHAT_ID]]['title'] is None:
+        title_message = (f"Create a title from this message sent by the user: {user_message}."
+                         f"The title should be short and should never repeat the message exactly, "
+                         f"it should always summarise it. Keep in mind that the message is often a question.")
+        title_response = openai.ChatCompletion.create(
+            model='gpt-3.5-turbo',
+            messages=[{'role': 'user', 'content': title_message}]
+        )
+
+        if title_response['choices'][0]['finish_reason'] == 'stop':
+            # Get the AI response content
+            title = title_response['choices'][0]['message']['content']
+
+            context.user_data[USER_DATA_KEY_HISTORY][context.user_data[USER_DATA_CURRENT_CHAT_ID]]['title'] = title
+
+    new_message_body = {'role': 'user', 'content': user_message}
+    context.user_data[USER_DATA_KEY_HISTORY][context.user_data[USER_DATA_CURRENT_CHAT_ID]]['history'].append(
+        new_message_body)
+
+    telegram_message = await update.message.reply_text("Thinking...")
+
+    response = openai.ChatCompletion.create(
+        model=context.user_data[USER_DATA_KEY_MODEL],
+        messages=context.user_data[USER_DATA_KEY_HISTORY][context.user_data[USER_DATA_CURRENT_CHAT_ID]]['history']
+    )
+
+    if response['choices'][0]['finish_reason'] == 'stop':
+        # Get the AI response content
+        ai_response = response['choices'][0]['message']['content']
+
+        # Append the AI response to user_data
+        ai_message_body = {'role': 'assistant', 'content': ai_response}
+        context.user_data[USER_DATA_KEY_HISTORY][context.user_data[USER_DATA_CURRENT_CHAT_ID]]['history'].append(
+            ai_message_body)
+
+        # Splitting the message into parts if it exceeds the Telegram limit
+        start = 0
+        messages = []
+        while start < len(ai_response):
+            end = min(start + 4096, len(ai_response))
+            messages.append(ai_response[start:end])
+            start = end
+
+        # Send the parts separately via Telegram
+        for index, msg in enumerate(messages):
+            if index == 0:
+                try:
+                    # Edit the original message for the first part
+                    await telegram_message.edit_text(msg, parse_mode=ParseMode.MARKDOWN)
+                except BadRequest:
+                    await telegram_message.edit_text(msg)
+            else:
+                try:
+                    # Reply to the original message for the subsequent parts
+                    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+                except BadRequest:
+                    # Reply to the original message for the subsequent parts
+                    await update.message.reply_text(msg)
+    else:
+        logger.warning("Error with OpeanAI request")
+        await telegram_message.edit_text('There was an error, please try again')
+
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Cancels and ends the conversation."""
+    user = update.message.from_user
+    logger.info("User %s canceled the conversation.", user.first_name)
+
+    del context.chat_data[update.message.from_user.id]
+
+    await update.message.reply_text(
+        "Bye! I hope we can talk again some day.", reply_markup=ReplyKeyboardRemove()
+    )
+
+    return ConversationHandler.END
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
@@ -94,11 +360,32 @@ def main() -> None:
     if not keyring_initialize():
         exit(0xFF)
 
+    # Initialize the Pickle database
+    my_persistence = PicklePersistence(filepath='../db')
+
+    openai.api_key = keyring_get('OpenAI')
+
     # Initialize Application
-    application = Application.builder().token(keyring_get('Telegram')).concurrent_updates(True).build()
+    application = Application.builder().token(keyring_get('Telegram')).persistence(persistence=my_persistence).concurrent_updates(True).build()
 
     # Assign an error handler
     application.add_error_handler(error_handler)
+
+    # Add the conversation handler
+    chatgpt_handler = ConversationHandler(
+        persistent=True,
+        name='chatGPT_handler',
+        entry_points=[CommandHandler('start', start)],
+        states={
+            MODEL_CHOSE: [MessageHandler(filters.Regex("^(GTP-3.5 Turbo|GPT-4)$"), model)],
+            CHAT: [MessageHandler(filters.TEXT & ~filters.COMMAND, chat)],
+            CHAT_SELECTION: [CallbackQueryHandler(chat_selection_callback),
+                             MessageHandler(filters.TEXT & ~filters.COMMAND, chat_selection)],
+            ACTIONS: [MessageHandler(filters.Regex("^(New chat|Delete chat|Select a chat)$"), actions)]
+        },
+        fallbacks=[CommandHandler("cancel", cancel)]
+    )
+    application.add_handler(chatgpt_handler)
 
     # Start the bot polling
     application.run_polling(allowed_updates=Update.ALL_TYPES)
