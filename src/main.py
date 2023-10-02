@@ -343,9 +343,9 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[int,
 
             await telegram_message.edit_text('Generating title...')
 
-            system_message = ("Create a title from the following conversation. "
-                              "The title should be short and should never repeat the messages exactly, "
-                              "it should always summarise it. Keep in mind that the message is often a question.")
+            system_message = ("Summarize the conversation in 5 words or fewer: "
+                              "Be as concise as possible without losing the context of the conversation. "
+                              "Your goal is to extract the key point of the conversation.")
 
             title_conversation = [
                 {'role': 'system',
