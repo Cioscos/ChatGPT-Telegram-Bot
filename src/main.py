@@ -28,7 +28,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     datefmt='%y-%m-%d %H:%M:%S',
-    filename='lovelace.log',
+    filename='chatgptbot.log',
     filemode='w'
 )
 
@@ -49,6 +49,7 @@ USER_DATA_KEY_ID = 'id'
 USER_DATA_CURRENT_CHAT_ID = 'current_chat_id'
 USER_DATA_TITLE = 'title'
 USER_DATA_TITLE_CHOSEN = 'chosen_title'
+USER_DATA_COMES_FROM_CHAT = 'comes_from_chat'
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -68,7 +69,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return MODEL_CHOSE
 
 
-async def actions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[int, None]:
+async def actions(update: Update, context: ContextTypes.DEFAULT_TYPE, comes_from_chat: bool = False) -> Union[int, None]:
     """
     Handles actions based on user input.
 
@@ -83,6 +84,15 @@ async def actions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[i
     message = update.message.text
 
     if message == 'New chat':
+        if comes_from_chat:
+            context.user_data[USER_DATA_COMES_FROM_CHAT] = True
+
+            reply_keyboard = [['GTP-3.5 Turbo', 'GPT-4']]
+            await update.message.reply_text(
+                "Please select a model for the new conversation!",
+                reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True, one_time_keyboard=True)
+            )
+
         structure_single_chat = {
             'title': None,
             'model': None,
@@ -101,14 +111,15 @@ async def actions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[i
 
         # Save the model chosen in the chat
         current_chat = chat_history[new_uuid]  # Intermediate object for the current chat
-        current_chat[USER_DATA_KEY_MODEL] = user_data[USER_DATA_KEY_MODEL]
+        current_chat[USER_DATA_KEY_MODEL] = user_data.get(USER_DATA_KEY_MODEL, None)
 
         # Save the current session to the just created chat
         user_data[USER_DATA_CURRENT_CHAT_ID] = new_uuid
 
-        await update.message.reply_text("New chat created!\nPlease send a message to start the chat!")
+        if not comes_from_chat:
+            await update.message.reply_text("New chat created!\nPlease send a message to start the chat!")
 
-        return CHAT
+        return MODEL_CHOSE if comes_from_chat else CHAT
 
     elif message == 'Delete chat':
         chat_history = context.user_data.get(USER_DATA_KEY_HISTORY, None)
@@ -151,6 +162,8 @@ async def actions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[i
         else:
             await update.message.reply_text("No chats available.")
             return ACTIONS
+    elif message in ['GTP-3.5 Turbo', 'GPT-4']:
+        return await model(update, context)
     else:
         current_chat_id = context.user_data.get(USER_DATA_CURRENT_CHAT_ID, None)
 
@@ -187,7 +200,7 @@ def generate_chat_list_keyboard(chat_history, page):
 
 async def to_actions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     # call again action function
-    return await actions(update, context)
+    return await actions(update, context, True)
 
 
 async def chat_selection_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[int, None]:
@@ -249,16 +262,37 @@ async def model(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     message = update.message.text
     logger.info("User choosed model: %s", message)
 
-    reply_keyboard = [['New chat', 'Delete chat'], ['Select a chat']]
+    user_data = context.user_data
 
     if message in ['GTP-3.5 Turbo', 'GPT-4']:
-        await update.message.reply_text(f"Ok, I will use {message} as model.\nPlease chose what to do:\n"
-                                        f"Do you want to start a new chat or finish an old one?",
-                                        reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True,
-                                                                         resize_keyboard=True,
-                                                                         input_field_placeholder='New chat or delete one chat?'))
+        reply_keyboard = [['New chat', 'Delete chat'], ['Select a chat']]
 
-        context.user_data[USER_DATA_KEY_MODEL] = OPENAI_GPT3 if message == 'GTP-3.5 Turbo' else OPENAI_GPT4
+        if context.user_data.get(USER_DATA_COMES_FROM_CHAT, False):
+            # If model function is called from actions function, means that actions function
+            # has been called during a chat.
+            # In this way we can manage to directly call action inside model function and not to wait another
+            # message which won't arrive from the user
+            await update.message.reply_text(f"Ok, I will use {message} as model.\n"
+                                            "Please send a message to start the chat!",
+                                            reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True,
+                                                                             resize_keyboard=True)
+                                            )
+            current_chatid = user_data[USER_DATA_CURRENT_CHAT_ID]
+            conversation = user_data[USER_DATA_KEY_HISTORY]
+            user_data[USER_DATA_COMES_FROM_CHAT] = False
+            conversation[current_chatid][USER_DATA_KEY_MODEL] = message
+
+            return CHAT
+        else:
+            # We arrive here basically only from start callback
+            if message in ['GTP-3.5 Turbo', 'GPT-4']:
+                await update.message.reply_text(f"Ok, I will use {message} as model.\nPlease chose what to do:\n"
+                                                f"Do you want to start a new chat or finish an old one?",
+                                                reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True,
+                                                                                 resize_keyboard=True,
+                                                                                 input_field_placeholder='New chat or delete one chat?'))
+
+                user_data[USER_DATA_KEY_MODEL] = OPENAI_GPT3 if message == 'GTP-3.5 Turbo' else OPENAI_GPT4
 
     return ACTIONS
 
@@ -270,7 +304,7 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[int,
     # change status of the chat if the message is new chat or some other command
     if user_message in ['New chat', 'Delete chat', 'Select a chat']:
         # Directly call the actions function and return the resulting state
-        return await actions(update, context)
+        return await actions(update, context, comes_from_chat=True)
 
     # Initialize commonly accessed user data and message history for readability
     user_data = context.user_data
@@ -379,7 +413,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user = update.message.from_user
     logger.info("User %s canceled the conversation.", user.first_name)
 
-    del context.chat_data[update.message.from_user.id]
+    context.application.drop_user_data(user.id)
 
     await update.message.reply_text(
         "Bye! I hope we can talk again some day.", reply_markup=ReplyKeyboardRemove()
