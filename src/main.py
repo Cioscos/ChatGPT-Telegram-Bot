@@ -50,6 +50,9 @@ USER_DATA_CURRENT_CHAT_ID = 'current_chat_id'
 USER_DATA_TITLE = 'title'
 USER_DATA_TITLE_CHOSEN = 'chosen_title'
 USER_DATA_COMES_FROM_CHAT = 'comes_from_chat'
+USER_DATA_TEMP_MESSAGES = 'temp_messages'
+
+TELEGRAM_MAX_MSG_LENGTH = 4096
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -312,6 +315,23 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[int,
     current_chat = user_data[USER_DATA_KEY_HISTORY][current_chat_id]
     message_history = user_data[USER_DATA_KEY_HISTORY][current_chat_id]['history']
 
+    # check length of message to understand if it can be potentially a part of a longer text
+    temp_messages = current_chat.get(USER_DATA_TEMP_MESSAGES, [])
+    if len(user_message) == TELEGRAM_MAX_MSG_LENGTH:
+        # get the list of temp messages
+        temp_messages.append(user_message)
+        # update the list in the user_data dictionary
+        current_chat[USER_DATA_TEMP_MESSAGES] = temp_messages
+
+        return CHAT
+    else:
+        # if the message is not long enough, concatenate the temp messages saved if there are
+        if temp_messages:
+            final_message = " ".join(temp_messages)
+            current_chat[USER_DATA_TEMP_MESSAGES] = []
+        else:
+            final_message = user_message
+
     system_message = {
         'role': 'system',
         'content': 'You are a bot in a telegram chat which emulate the functioning of ChatGPT. '
@@ -319,7 +339,7 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[int,
                    'Also consider that I am using python-telegram-bot as a library for the bot.'
     }
 
-    new_message_body = {'role': 'user', 'content': user_message}
+    new_message_body = {'role': 'user', 'content': final_message}
 
     if len(message_history) == 0:
         message_history.extend([system_message, new_message_body])
