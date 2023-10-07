@@ -3,7 +3,7 @@ import json
 import logging
 import traceback
 import uuid
-from typing import Union
+from typing import Union, List, Dict
 from warnings import filterwarnings
 
 import openai
@@ -313,7 +313,7 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[int,
     user_data = context.user_data
     current_chat_id = user_data[USER_DATA_CURRENT_CHAT_ID]
     current_chat = user_data[USER_DATA_KEY_HISTORY][current_chat_id]
-    message_history = user_data[USER_DATA_KEY_HISTORY][current_chat_id]['history']
+    message_history = current_chat['history']
 
     # check length of message to understand if it can be potentially a part of a longer text
     temp_messages = current_chat.get(USER_DATA_TEMP_MESSAGES, [])
@@ -442,7 +442,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     The error callback function.
     This function is used to handle possible Telegram API errors that aren't handled.
@@ -483,6 +483,31 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+async def history_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    conversation_history: str = 'This is the history of this conversation:\n\n'
+
+    message_headers: Dict[str, str] = {
+        'user': 'You:',
+        'assistant': 'Me:'
+    }
+
+    # Initialize commonly accessed user data and message history for readability
+    user_data: Dict = context.user_data
+    current_chat_id: str = user_data[USER_DATA_CURRENT_CHAT_ID]
+    current_chat: dict = user_data[USER_DATA_KEY_HISTORY][current_chat_id]
+    message_history: List[Dict[str, str]] = current_chat['history']
+
+    for message in message_history:
+        message_role: str = message.get('role', '')
+        message_header = message_headers.get(message_role)
+        if message_header:
+            conversation_history += f"*{message_headers[message_role]}* {message.get('content')}\n"
+
+    await update.message.reply_text(conversation_history, parse_mode=ParseMode.MARKDOWN)
+
+    return CHAT
+
+
 def main() -> None:
     # Initialize the keyring
     if not keyring_initialize():
@@ -507,9 +532,11 @@ def main() -> None:
         entry_points=[CommandHandler('start', start)],
         states={
             MODEL_CHOSE: [MessageHandler(filters.Regex("^(GTP-3.5 Turbo|GPT-4)$"), model)],
-            CHAT: [MessageHandler(filters.TEXT & ~filters.COMMAND, chat)],
+            CHAT: [MessageHandler(filters.TEXT & ~filters.COMMAND, chat),
+                   CommandHandler('history', history_callback)],
             CHAT_SELECTION: [CallbackQueryHandler(chat_selection_callback),
-                             MessageHandler(filters.TEXT & ~filters.COMMAND, to_actions)],
+                             MessageHandler(filters.TEXT & ~filters.COMMAND, to_actions),
+                             CommandHandler('history', history_callback)],
             ACTIONS: [MessageHandler(filters.Regex("^(New chat|Delete chat|Select a chat)$"), actions)]
         },
         fallbacks=[CommandHandler("cancel", cancel)]
