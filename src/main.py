@@ -79,12 +79,13 @@ async def actions(update: Update, context: ContextTypes.DEFAULT_TYPE, comes_from
     Args:
         update (Update): Update object containing the incoming message.
         context (ContextTypes.DEFAULT_TYPE): Context object that holds runtime data.
+        comes_from_chat (bool): True it actions call has been called from chat function
 
     Returns:
         Union[int, None]: State of the chat session.
     """
 
-    message = update.message.text
+    message: str = update.message.text
 
     if message == 'New chat':
         if comes_from_chat:
@@ -103,18 +104,18 @@ async def actions(update: Update, context: ContextTypes.DEFAULT_TYPE, comes_from
         }
 
         # Generate a new UUID for the new chat
-        new_uuid = str(uuid.uuid4())
-        user_data = context.user_data  # Intermediate object for user_data
+        new_uuid: str = str(uuid.uuid4())
+        user_data: Dict = context.user_data
         user_data[USER_DATA_KEY_ID] = new_uuid
 
         # Initialize or update chat history
-        chat_history = user_data.get(USER_DATA_KEY_HISTORY, {})
+        chat_history: Dict = user_data.get(USER_DATA_KEY_HISTORY, {})
         chat_history[new_uuid] = structure_single_chat
         user_data[USER_DATA_KEY_HISTORY] = chat_history
 
         # Save the model chosen in the chat
-        current_chat = chat_history[new_uuid]  # Intermediate object for the current chat
-        current_chat[USER_DATA_KEY_MODEL] = user_data.get(USER_DATA_KEY_MODEL, None)
+        current_chat: Dict = chat_history[new_uuid]
+        current_chat[USER_DATA_KEY_MODEL] = user_data.get(USER_DATA_KEY_MODEL)
 
         # Save the current session to the just created chat
         user_data[USER_DATA_CURRENT_CHAT_ID] = new_uuid
@@ -125,8 +126,8 @@ async def actions(update: Update, context: ContextTypes.DEFAULT_TYPE, comes_from
         return MODEL_CHOSE if comes_from_chat else CHAT
 
     elif message == 'Delete chat':
-        chat_history = context.user_data.get(USER_DATA_KEY_HISTORY, None)
-        current_chat_id = context.user_data.get(USER_DATA_CURRENT_CHAT_ID, None)
+        chat_history: Dict = context.user_data.get(USER_DATA_KEY_HISTORY)
+        current_chat_id: str = context.user_data.get(USER_DATA_CURRENT_CHAT_ID)
 
         if chat_history and current_chat_id and chat_history.get(current_chat_id):
             del chat_history[current_chat_id]
@@ -155,7 +156,7 @@ async def actions(update: Update, context: ContextTypes.DEFAULT_TYPE, comes_from
             return MODEL_CHOSE
 
     elif message == 'Select a chat':
-        chat_history = context.user_data.get(USER_DATA_KEY_HISTORY, None)
+        chat_history: Dict = context.user_data.get(USER_DATA_KEY_HISTORY)
 
         if chat_history:
             current_page = context.user_data.get('current_page', 0)
@@ -168,7 +169,7 @@ async def actions(update: Update, context: ContextTypes.DEFAULT_TYPE, comes_from
     elif message in ['GTP-3.5 Turbo', 'GPT-4']:
         return await model(update, context)
     else:
-        current_chat_id = context.user_data.get(USER_DATA_CURRENT_CHAT_ID, None)
+        current_chat_id = context.user_data.get(USER_DATA_CURRENT_CHAT_ID)
 
         if current_chat_id:
             return await chat(update, context)
@@ -494,7 +495,7 @@ async def history_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     # Initialize commonly accessed user data and message history for readability
     user_data: Dict = context.user_data
     current_chat_id: str = user_data[USER_DATA_CURRENT_CHAT_ID]
-    current_chat: dict = user_data[USER_DATA_KEY_HISTORY][current_chat_id]
+    current_chat: Dict = user_data[USER_DATA_KEY_HISTORY][current_chat_id]
     message_history: List[Dict[str, str]] = current_chat['history']
 
     for message in message_history:
