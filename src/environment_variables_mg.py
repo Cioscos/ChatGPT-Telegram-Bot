@@ -1,5 +1,6 @@
 import logging
 import os
+from typing import Union
 
 logger = logging.getLogger(__name__)
 
@@ -10,7 +11,7 @@ KEYRING = {
 }
 
 
-def keyring_initialize():
+def keyring_initialize() -> Union[bool, None]:
     """
     Initialize the keyring.
     This functions load from decrypted partition the keys needed.
@@ -36,7 +37,7 @@ def keyring_initialize():
     return True
 
 
-def keyring_get(service):
+def keyring_get(service: str) -> Union[str, None]:
     """
     Get the key related to a service from the keyring.
 
