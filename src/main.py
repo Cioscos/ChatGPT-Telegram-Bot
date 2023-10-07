@@ -55,6 +55,14 @@ USER_DATA_TEMP_MESSAGES = 'temp_messages'
 TELEGRAM_MAX_MSG_LENGTH = 4096
 
 
+def markdown_escape(text:str) -> str:
+    # Escape special characters in text
+    escape_chars = '_[]()~`>#+-=|{}.!'
+    for char in escape_chars:
+        text = text.replace(char, f'\\{char}')
+    return text
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
     The callback called when the bot receive the classical start command on a new conversation.
@@ -242,7 +250,8 @@ async def chat_selection_callback(update: Update, context: ContextTypes.DEFAULT_
         reply_keyboard = [['New chat', 'Delete chat'], ['Select a chat']]
 
         await context.bot.send_message(chat_id=query.from_user.id,
-                                       text=f"You have selected the conversation with title:\n{selected_title}",
+                                       text=f"You have selected the conversation with title:\n{selected_title}\n"
+                                            f"Use /history to read the conversation's message history.",
                                        reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True,
                                                                         resize_keyboard=True))
         return CHAT
@@ -504,7 +513,7 @@ async def history_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if message_header:
             conversation_history += f"*{message_headers[message_role]}* {message.get('content')}\n"
 
-    await update.message.reply_text(conversation_history, parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(markdown_escape(conversation_history), parse_mode=ParseMode.MARKDOWN)
 
     return CHAT
 
