@@ -55,7 +55,7 @@ USER_DATA_TEMP_MESSAGES = 'temp_messages'
 TELEGRAM_MAX_MSG_LENGTH = 4096
 
 
-def markdown_escape(text:str) -> str:
+def markdown_escape(text: str) -> str:
     # Escape special characters in text
     escape_chars = '_[]()~`>#+-=|{}.!'
     for char in escape_chars:
@@ -80,7 +80,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return MODEL_CHOSE
 
 
-async def actions(update: Update, context: ContextTypes.DEFAULT_TYPE, comes_from_chat: bool = False) -> Union[int, None]:
+async def actions(update: Update, context: ContextTypes.DEFAULT_TYPE, comes_from_chat: bool = False) -> Union[
+    int, None]:
     """
     Handles actions based on user input.
 
@@ -346,7 +347,10 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[int,
         'role': 'system',
         'content': 'You are a bot in a telegram chat which emulate the functioning of ChatGPT. '
                    'So you will formulate the messages taking into account the way telegram handles markdown. '
-                   'Also consider that I am using python-telegram-bot as a library for the bot.'
+                   'Also consider that I am using python-telegram-bot as a library for the bot so consider it\'s way '
+                   'to format markdown too. '
+                   'Answer to the messages in the most completed way possible, creating examples, numbered list if it\'s possible '
+                   'and sending pieces of code when it\'s the case'
     }
 
     new_message_body = {'role': 'user', 'content': final_message}
@@ -360,7 +364,8 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[int,
 
     response = openai.ChatCompletion.create(
         model=context.user_data[USER_DATA_KEY_MODEL],
-        messages=message_history
+        messages=message_history,
+        temperature=0.2
     )
 
     if response['choices'][0]['finish_reason'] == 'stop':
@@ -373,19 +378,20 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[int,
 
             await telegram_message.edit_text('Generating title...')
 
-            system_message = ("Summarize the conversation in 5 words or fewer: "
-                              "Be as concise as possible without losing the context of the conversation. "
-                              "Your goal is to extract the key point of the conversation.")
+            title_prompt = ("Conversation:\n"
+                            f"User: {final_message}\n"
+                            f"GPT: {ai_response}\n\n"
+                            "Please provide a succinct and compelling title for the above conversation. "
+                            "Use less articles and words possible. Use Maximum 5 words.")
 
             title_conversation = [
-                {'role': 'system',
-                 'content': system_message},
-                new_message_body,
-                ai_message_body
+                {'role': 'user',
+                 'content': title_prompt}
             ]
             title_response = openai.ChatCompletion.create(
                 model='gpt-3.5-turbo',
-                messages=title_conversation
+                messages=title_conversation,
+                temperature=0
             )
 
             if title_response['choices'][0]['finish_reason'] == 'stop':
@@ -530,7 +536,7 @@ def main() -> None:
 
     # Initialize Application
     application = Application.builder().token(keyring_get('Telegram')).persistence(
-        persistence=my_persistence).concurrent_updates(True).build()
+        persistence=my_persistence).build()
 
     # Assign an error handler
     application.add_error_handler(error_handler)
