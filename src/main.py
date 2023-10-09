@@ -536,7 +536,7 @@ def main() -> None:
 
     # Initialize Application
     application = Application.builder().token(keyring_get('Telegram')).persistence(
-        persistence=my_persistence).build()
+        persistence=my_persistence).concurrent_updates(True).build()
 
     # Assign an error handler
     application.add_error_handler(error_handler)
