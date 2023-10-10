@@ -4,7 +4,7 @@ import logging
 import re
 import traceback
 import uuid
-from typing import Union, List, Dict, Set
+from typing import Union, List, Dict, Set, Optional
 from warnings import filterwarnings
 
 import openai
@@ -126,8 +126,8 @@ async def approval(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     data: str = query.data
 
     user_id, approval_status = data.split(':')[1], data.split(':')[0]
-    original_user_update: Update = None
-    original_user_context: ContextTypes.DEFAULT_TYPE = None
+    original_user_update: Optional[Update]
+    original_user_context: Optional[ContextTypes.DEFAULT_TYPE]
     original_user_update, original_user_context = context.bot_data.pop(BOT_DATA_UPDATE_AND_CONTEXT_FROM_USER_TO_APPROVE, tuple())
 
     # delete approval message
