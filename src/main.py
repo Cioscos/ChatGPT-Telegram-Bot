@@ -1,13 +1,15 @@
 import html
 import json
 import logging
+import re
 import traceback
 import uuid
-from typing import Union, List, Dict
+from typing import Union, List, Dict, Set
 from warnings import filterwarnings
 
 import openai
-from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup, User, \
+    CallbackQuery
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
 from telegram.ext import (
@@ -39,7 +41,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
-MODEL_CHOSE, CHAT, ACTIONS, CHAT_SELECTION = range(4)
+MODEL_CHOSE, CHAT, ACTIONS, CHAT_SELECTION, APPROVAL, NOT_APPROVED, INTRODUCTION = range(7)
 
 OPENAI_GPT3 = 'gpt-3.5-turbo'
 OPENAI_GPT4 = 'gpt-4'
@@ -51,6 +53,14 @@ USER_DATA_TITLE = 'title'
 USER_DATA_TITLE_CHOSEN = 'chosen_title'
 USER_DATA_COMES_FROM_CHAT = 'comes_from_chat'
 USER_DATA_TEMP_MESSAGES = 'temp_messages'
+USER_DATA_NOT_APPROVED = 'not_approved'
+
+BOT_DATA_UPDATE_AND_CONTEXT_FROM_USER_TO_APPROVE = 'update_from_user_to_approve'
+BOT_DATA_APPROVED_USERS = 'approved_users'
+BOT_DATA_APPROVE_MESSAGE = 'approve_message'
+
+CALLBACK_APPROVAL_APPROVE_USER = 'callback_data-approval-ok'
+CALLBACK_APPROVAL_NOT_APPROVE_USER = 'callback_data-approval-notok'
 
 TELEGRAM_MAX_MSG_LENGTH = 4096
 
@@ -67,6 +77,100 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
     The callback called when the bot receive the classical start command on a new conversation.
     """
+
+    user: User = update.message.from_user
+    user_name = user.username
+    name = user.name
+    user_id = user.id
+
+    # check if the username is set
+    if user_name is None:
+        await update.message.reply_text('Hi! To use this  bot you have to set an username.\n'
+                                        'Press please /start again after doing so.')
+        return ConversationHandler.END
+
+    if str(user_id) in context.bot_data.get(BOT_DATA_APPROVED_USERS, set()):
+        return await introduction(update, context)
+
+    await update.message.reply_text("Hi! This is a telegram bot which imitates the behaviour of ChatGPT.\n"
+                                    "This bot uses OpenAI API to generates the responses for you so the bot's owner "
+                                    "will approve you or not for the usage of the bot.\n"
+                                    "Please wait for approval...")
+
+    # send a message to the bot developer
+    dev_id: str = keyring_get('DevId')
+
+    # Preparing the inline keyboard
+    keyboard: List[List[InlineKeyboardButton]] = [
+        [InlineKeyboardButton('Approve', callback_data=str(CALLBACK_APPROVAL_APPROVE_USER + ':' + str(user_id))),
+         InlineKeyboardButton('Not approve', callback_data=str(CALLBACK_APPROVAL_NOT_APPROVE_USER + ':' + str(user_id)))]
+    ]
+    markup = InlineKeyboardMarkup(keyboard)
+
+    msg_text: str = f"User {name if name else ''} (user name: @{user_name}) requested access to the bot."
+    approve_message = await context.bot.send_message(dev_id, msg_text, reply_markup=markup)
+
+    # save the original update in the bot_data
+    context.bot_data[BOT_DATA_UPDATE_AND_CONTEXT_FROM_USER_TO_APPROVE] = (update, context)
+    context.bot_data[BOT_DATA_APPROVE_MESSAGE] = approve_message
+
+    return APPROVAL
+
+
+async def approval(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    Handles the approval from the dev
+    """
+    query: CallbackQuery = update.callback_query
+    await query.answer()
+    data: str = query.data
+
+    user_id, approval_status = data.split(':')[1], data.split(':')[0]
+    original_user_update: Update = None
+    original_user_context: ContextTypes.DEFAULT_TYPE = None
+    original_user_update, original_user_context = context.bot_data.pop(BOT_DATA_UPDATE_AND_CONTEXT_FROM_USER_TO_APPROVE, tuple())
+
+    # delete approval message
+    await original_user_context.bot_data[BOT_DATA_APPROVE_MESSAGE].delete()
+
+    if approval_status == CALLBACK_APPROVAL_APPROVE_USER:
+        await context.bot.send_message(chat_id=user_id, text="You have been approved. You can now use the bot.")
+
+        approved_users = context.bot_data.setdefault(BOT_DATA_APPROVED_USERS, set())
+        approved_users.add(user_id)
+
+        await introduction(original_user_update, context)
+
+    elif approval_status == CALLBACK_APPROVAL_NOT_APPROVE_USER:
+        await context.bot.send_message(chat_id=user_id, text="You have not been approved. Goodbye.")
+        original_user_context.user_data[USER_DATA_NOT_APPROVED] = True
+
+
+async def approval_message_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    Works when the dev still didn't make a decision about the approval
+    """
+    user_id = update.message.from_user.id
+    if str(user_id) in context.bot_data.get(BOT_DATA_APPROVED_USERS, set()):
+        return await model(update, context)
+
+    if context.user_data.get(USER_DATA_NOT_APPROVED, False):
+        await update.message.reply_text("The developer refused your approval. There is no way to use the bot")
+    else:
+        await update.message.reply_text("The Dev still didn't decide about you approval. Plase wait.")
+
+
+async def not_approved_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Says to the user that he can't use the bot indefinitely
+    """
+    await update.message.reply_text("The developer refused your approval. There is no way to use the bot")
+
+
+async def introduction(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    It introduces the user after the approval from the Bot's owner
+    """
     reply_keyboard = [['GTP-3.5 Turbo', 'GPT-4']]
 
     await update.message.reply_text(
@@ -80,8 +184,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return MODEL_CHOSE
 
 
-async def actions(update: Update, context: ContextTypes.DEFAULT_TYPE, comes_from_chat: bool = False) -> Union[
-    int, None]:
+async def actions(update: Update, context: ContextTypes.DEFAULT_TYPE, comes_from_chat: bool = False) -> Union[int, None]:
     """
     Handles actions based on user input.
 
@@ -233,7 +336,7 @@ async def chat_selection_callback(update: Update, context: ContextTypes.DEFAULT_
 
     data = query.data
 
-    user_data = context.user_data  # Intermediate object for user_data
+    user_data = context.user_data
 
     # Initialize current_page if it's not already defined
     if 'current_page' not in user_data:
@@ -450,6 +553,10 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     logger.info("User %s canceled the conversation.", user.first_name)
 
     context.application.drop_user_data(user.id)
+    approved_users:Set = context.application.bot_data.pop(BOT_DATA_APPROVED_USERS, set())
+
+    if str(user.id) in approved_users:
+        approved_users.remove(str(user.id))
 
     await update.message.reply_text(
         "Bye! I hope we can talk again some day.", reply_markup=ReplyKeyboardRemove()
@@ -524,6 +631,10 @@ async def history_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     return CHAT
 
 
+def filter_approval(data: Union[str, object]) -> bool:
+    return re.match(r'callback_data-approval-(ok|notok)', data) is not None
+
+
 def main() -> None:
     # Initialize the keyring
     if not keyring_initialize():
@@ -547,6 +658,8 @@ def main() -> None:
         name='chatGPT_handler',
         entry_points=[CommandHandler('start', start)],
         states={
+            APPROVAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, approval_message_callback)],
+            NOT_APPROVED: [MessageHandler(filters.TEXT & ~filters.COMMAND, not_approved_callback)],
             MODEL_CHOSE: [MessageHandler(filters.Regex("^(GTP-3.5 Turbo|GPT-4)$"), model)],
             CHAT: [MessageHandler(filters.TEXT & ~filters.COMMAND, chat),
                    CommandHandler('history', history_callback)],
@@ -558,6 +671,9 @@ def main() -> None:
         fallbacks=[CommandHandler("cancel", cancel)]
     )
     application.add_handler(chatgpt_handler)
+
+    approval_handler = CallbackQueryHandler(approval, pattern=filter_approval)
+    application.add_handler(approval_handler)
 
     # Start the bot polling
     application.run_polling(allowed_updates=Update.ALL_TYPES)
