@@ -6,6 +6,7 @@ import traceback
 import uuid
 from typing import Union, List, Dict, Set, Optional
 from warnings import filterwarnings
+from itertools import zip_longest
 
 import openai
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup, User, \
@@ -24,6 +25,7 @@ from telegram.warnings import PTBUserWarning
 
 from environment_variables_mg import keyring_get, keyring_initialize
 from utility import format_code_response
+from personality import PERSONALITIES
 
 # Setup logging
 logging.basicConfig(
@@ -41,7 +43,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
-MODEL_CHOSE, CHAT, ACTIONS, CHAT_SELECTION, APPROVAL, NOT_APPROVED, INTRODUCTION = range(7)
+MODEL_CHOSE, CHAT, ACTIONS, CHAT_SELECTION, APPROVAL, NOT_APPROVED, INTRODUCTION, PERSONALITY_CHOICE = range(8)
 
 OPENAI_GPT3 = 'gpt-3.5-turbo'
 OPENAI_GPT4 = 'gpt-4'
@@ -54,6 +56,7 @@ USER_DATA_TITLE_CHOSEN = 'chosen_title'
 USER_DATA_COMES_FROM_CHAT = 'comes_from_chat'
 USER_DATA_TEMP_MESSAGES = 'temp_messages'
 USER_DATA_NOT_APPROVED = 'not_approved'
+USER_DATA_PERSONALITY = 'personality'
 
 BOT_DATA_UPDATE_AND_CONTEXT_FROM_USER_TO_APPROVE = 'update_from_user_to_approve'
 BOT_DATA_APPROVED_USERS = 'approved_users'
@@ -274,6 +277,33 @@ async def actions(update: Update, context: ContextTypes.DEFAULT_TYPE, comes_from
             return ACTIONS
     elif message in ['GTP-3.5 Turbo', 'GPT-4']:
         return await model(update, context)
+
+    elif message == 'Personality':
+        """
+        Handles the 'Personality' message event to create an inline keyboard with personalities.
+        PERSONALITIES: A dictionary containing available personalities.
+        message: The incoming message text.
+        update: The message update object.
+
+        Returns:
+            The next state for the chat.
+        """
+        personalities = list(PERSONALITIES.keys())
+        # Group elements in pairs using zip_longest
+        grouped_personality = list(zip_longest(*[iter(personalities)] * 2, fillvalue=None))
+
+        # Build the keyboard
+        keyboard = [
+            [InlineKeyboardButton(personality, callback_data=f"personality:{personality}") for personality in group if
+             personality is not None]
+            for group in grouped_personality
+        ]
+
+        inline_keyboard = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text("👤 Chosen Personality for ChatGPT", reply_markup=inline_keyboard)
+
+        return PERSONALITY_CHOICE
+
     else:
         current_chat_id = context.user_data.get(USER_DATA_CURRENT_CHAT_ID)
 
@@ -311,6 +341,21 @@ def generate_chat_list_keyboard(chat_history, page):
 async def to_actions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     # call again action function
     return await actions(update, context, True)
+
+
+async def personality_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    user_data = context.user_data
+
+    if data.startswith("personality:"):
+        personality = data.split(':')[1]
+        user_data[USER_DATA_PERSONALITY] = personality
+
+        await query.message.reply_text(f"You chose {personality.lower()} personality")
+
+        return CHAT_SELECTION
 
 
 async def chat_selection_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[int, None]:
@@ -376,7 +421,7 @@ async def model(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_data = context.user_data
 
     if message in ['GTP-3.5 Turbo', 'GPT-4']:
-        reply_keyboard = [['New chat', 'Delete chat'], ['Select a chat']]
+        reply_keyboard = [['New chat', 'Delete chat'], ['Select a chat', 'Personality']]
 
         if context.user_data.get(USER_DATA_COMES_FROM_CHAT, False):
             # If model function is called from actions function, means that actions function
@@ -413,7 +458,7 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[int,
     user_message = update.message.text
 
     # change status of the chat if the message is new chat or some other command
-    if user_message in ['New chat', 'Delete chat', 'Select a chat']:
+    if user_message in ['New chat', 'Delete chat', 'Select a chat', 'Personality']:
         # Directly call the actions function and return the resulting state
         return await actions(update, context, comes_from_chat=True)
 
@@ -442,7 +487,7 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[int,
 
     system_message = {
         'role': 'system',
-        'content': 'You are a bot in a telegram chat which emulate the functioning of ChatGPT. '
+        'content': 'You are a bot in a telegram chat '
                    'So you will formulate the messages taking into account the way telegram handles markdown. '
                    'Also consider that I am using python-telegram-bot as a library for the bot so consider it\'s way '
                    'to format markdown too. '
@@ -450,6 +495,10 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[int,
                    'and sending pieces of code when it\'s the case'
     }
 
+    # Append to final_message the personality body
+    personality = user_data.get(USER_DATA_PERSONALITY)
+    personality_body = PERSONALITIES.get(personality, '') if personality is not None else ''
+    final_message += personality_body
     new_message_body = {'role': 'user', 'content': final_message}
 
     if len(message_history) == 0:
@@ -625,6 +674,10 @@ async def history_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     return CHAT
 
 
+async def personality_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text("Questa è una prova")
+
+
 def filter_approval(data: Union[str, object]) -> bool:
     return re.match(r'callback_data-approval-(ok|notok)', data) is not None
 
@@ -654,12 +707,13 @@ def main() -> None:
         states={
             APPROVAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, approval_message_callback)],
             MODEL_CHOSE: [MessageHandler(filters.Regex("^(GTP-3.5 Turbo|GPT-4)$"), model)],
+            PERSONALITY_CHOICE: [CallbackQueryHandler(personality_choice)],
             CHAT: [MessageHandler(filters.TEXT & ~filters.COMMAND, chat),
                    CommandHandler('history', history_callback)],
             CHAT_SELECTION: [CallbackQueryHandler(chat_selection_callback),
                              MessageHandler(filters.TEXT & ~filters.COMMAND, to_actions),
                              CommandHandler('history', history_callback)],
-            ACTIONS: [MessageHandler(filters.Regex("^(New chat|Delete chat|Select a chat)$"), actions)]
+            ACTIONS: [MessageHandler(filters.Regex("^(New chat|Delete chat|Select a chat|Personality)$"), actions)]
         },
         fallbacks=[CommandHandler("cancel", cancel)]
     )
