@@ -702,7 +702,7 @@ def main() -> None:
     # Add the conversation handler
     chatgpt_handler = ConversationHandler(
         persistent=True,
-        name='chatGPT_handler_v2',
+        name='chatGPT_handler_v3',
         entry_points=[CommandHandler('start', start)],
         states={
             APPROVAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, approval_message_callback)],
