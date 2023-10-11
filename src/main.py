@@ -89,13 +89,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
                                         'Press please /start again after doing so.')
         return ConversationHandler.END
 
+    # check if the user id is already saved in the bot_data
     if str(user_id) in context.bot_data.get(BOT_DATA_APPROVED_USERS, set()):
         return await introduction(update, context)
 
-    await update.message.reply_text("Hi! This is a telegram bot which imitates the behaviour of ChatGPT.\n"
-                                    "This bot uses OpenAI API to generates the responses for you so the bot's owner "
-                                    "will approve you or not for the usage of the bot.\n"
-                                    "Please wait for approval...")
+    await update.message.reply_text("<b>Hi! This is a telegram bot which imitates the behaviour of ChatGPT.</b>\n\n"
+                                    "🚦 This bot uses OpenAI API to generates responses for you 🚦\n"
+                                    "🚦 so the bot's owner must approve you to use it 🚦\n\n"
+                                    "Please wait for approval...", parse_mode=ParseMode.HTML)
 
     # send a message to the bot developer
     dev_id: str = keyring_get('DevId')
@@ -158,13 +159,6 @@ async def approval_message_callback(update: Update, context: ContextTypes.DEFAUL
         await update.message.reply_text("The developer refused your approval. There is no way to use the bot")
     else:
         await update.message.reply_text("The Dev still didn't decide about you approval. Plase wait.")
-
-
-async def not_approved_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    Says to the user that he can't use the bot indefinitely
-    """
-    await update.message.reply_text("The developer refused your approval. There is no way to use the bot")
 
 
 async def introduction(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -530,13 +524,13 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[int,
             if index == 0:
                 try:
                     # Edit the original message for the first part
-                    await telegram_message.edit_text(msg, parse_mode=ParseMode.MARKDOWN)
+                    await telegram_message.edit_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
                 except BadRequest:
                     await telegram_message.edit_text(msg)
             else:
                 try:
                     # Reply to the original message for the subsequent parts
-                    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+                    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
                 except BadRequest:
                     # Reply to the original message for the subsequent parts
                     await update.message.reply_text(msg)
@@ -626,7 +620,7 @@ async def history_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if message_header:
             conversation_history += f"*{message_headers[message_role]}* {message.get('content')}\n"
 
-    await update.message.reply_text(markdown_escape(conversation_history), parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(markdown_escape(conversation_history), parse_mode=ParseMode.MARKDOWN_V2)
 
     return CHAT
 
@@ -659,7 +653,6 @@ def main() -> None:
         entry_points=[CommandHandler('start', start)],
         states={
             APPROVAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, approval_message_callback)],
-            NOT_APPROVED: [MessageHandler(filters.TEXT & ~filters.COMMAND, not_approved_callback)],
             MODEL_CHOSE: [MessageHandler(filters.Regex("^(GTP-3.5 Turbo|GPT-4)$"), model)],
             CHAT: [MessageHandler(filters.TEXT & ~filters.COMMAND, chat),
                    CommandHandler('history', history_callback)],
