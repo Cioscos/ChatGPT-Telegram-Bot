@@ -25,8 +25,8 @@ from telegram.warnings import PTBUserWarning
 
 from environment_variables_mg import keyring_get, keyring_initialize
 from openai_lib_wrapper import OpenAiLibWrapper
-from utility import format_code_response
 from personality import PERSONALITIES
+from helper import escape_markdown
 
 # Setup logging
 logging.basicConfig(
@@ -490,8 +490,6 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[int,
         'role': 'system',
         'content': 'You are a bot in a telegram chat '
                    'So you will formulate the messages taking into account the way telegram handles markdown. '
-                   'Also consider that I am using python-telegram-bot as a library for the bot so consider it\'s way '
-                   'to format markdown too. '
                    'Answer to the messages in the most completed way possible, creating examples, numbered list if it\'s possible '
                    'and sending pieces of code when it\'s the case'
     }
@@ -556,7 +554,8 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[int,
                 return
 
         # format the message to eventually send pieces of code correctly
-        ai_response = format_code_response(ai_response)
+        logger.info("Original ai_response: %s", ai_response)
+        ai_response = escape_markdown(ai_response, 1)
 
         # Append the AI response to user_data
         message_history.append(ai_message_body)
@@ -574,13 +573,13 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[int,
             if index == 0:
                 try:
                     # Edit the original message for the first part
-                    await telegram_message.edit_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
+                    await telegram_message.edit_text(msg, parse_mode=ParseMode.MARKDOWN)
                 except BadRequest:
                     await telegram_message.edit_text(msg)
             else:
                 try:
                     # Reply to the original message for the subsequent parts
-                    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN_V2)
+                    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
                 except BadRequest:
                     # Reply to the original message for the subsequent parts
                     await update.message.reply_text(msg)
@@ -670,7 +669,7 @@ async def history_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if message_header:
             conversation_history += f"*{message_headers[message_role]}* {message.get('content')}\n"
 
-    await update.message.reply_text(markdown_escape(conversation_history), parse_mode=ParseMode.MARKDOWN_V2)
+    await update.message.reply_text(escape_markdown(conversation_history, 2), parse_mode=ParseMode.MARKDOWN_V2)
 
     return CHAT
 

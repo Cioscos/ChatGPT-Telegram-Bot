@@ -32,7 +32,7 @@ class OpenAiLibWrapper:
             raise ValueError("No api_key initialized")
 
     @classmethod
-    def chat_completition(cls, *args, **kwargs) -> Optional[Dict]:
+    def chat_completition(cls, *args, **kwargs):
         # check for api key
         cls.check_api_key()
 
