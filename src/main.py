@@ -24,7 +24,7 @@ from telegram.ext import (
 from telegram.warnings import PTBUserWarning
 
 from environment_variables_mg import keyring_get, keyring_initialize
-from src.openai_lib_wrapper import OpenAiLibWrapper
+from openai_lib_wrapper import OpenAiLibWrapper
 from utility import format_code_response
 from personality import PERSONALITIES
 
