@@ -24,6 +24,7 @@ from telegram.ext import (
 from telegram.warnings import PTBUserWarning
 
 from environment_variables_mg import keyring_get, keyring_initialize
+from src.openai_lib_wrapper import OpenAiLibWrapper
 from utility import format_code_response
 from personality import PERSONALITIES
 
@@ -508,7 +509,7 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[int,
 
     telegram_message = await update.message.reply_text("Thinking...")
 
-    response = openai.ChatCompletion.create(
+    response = OpenAiLibWrapper.chat_completition(
         model=context.user_data[USER_DATA_KEY_MODEL],
         messages=message_history,
         temperature=0.2
@@ -534,7 +535,7 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[int,
                 {'role': 'user',
                  'content': title_prompt}
             ]
-            title_response = openai.ChatCompletion.create(
+            title_response = OpenAiLibWrapper.chat_completition(
                 model='gpt-3.5-turbo',
                 messages=title_conversation,
                 temperature=0
@@ -690,7 +691,8 @@ def main() -> None:
     # Initialize the Pickle database
     my_persistence = PicklePersistence(filepath='DB')
 
-    openai.api_key = keyring_get('OpenAI')
+    OpenAiLibWrapper.set_api_key(keyring_get('OpenAI'))
+    OpenAiLibWrapper.set_timeout(60)
 
     # Initialize Application
     application = Application.builder().token(keyring_get('Telegram')).persistence(
