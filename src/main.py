@@ -34,7 +34,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     datefmt='%y-%m-%d %H:%M:%S',
     filename='chatgptbot.log',
-    filemode='w'
+    filemode='a'
 )
 
 filterwarnings(action="ignore", message=r".*CallbackQueryHandler", category=PTBUserWarning)
@@ -548,14 +548,11 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[int,
                 # Means that the title has been assigned to the conversation
                 current_chat[USER_DATA_TITLE_CHOSEN] = True
             else:
+                logger.error("Error with OpenAI API (Generating title)")
                 await telegram_message.edit_text("Error with OpenAI API. Please wait some seconds and retry.")
                 # Remove the last element from the history since the message won't be read from the API
                 message_history.pop(-1)
                 return
-
-        # format the message to eventually send pieces of code correctly
-        logger.info("Original ai_response: %s", ai_response)
-        ai_response = escape_markdown(ai_response, 1)
 
         # Append the AI response to user_data
         message_history.append(ai_message_body)
@@ -573,18 +570,18 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[int,
             if index == 0:
                 try:
                     # Edit the original message for the first part
-                    await telegram_message.edit_text(msg, parse_mode=ParseMode.MARKDOWN)
+                    await telegram_message.edit_text(msg)
                 except BadRequest:
                     await telegram_message.edit_text(msg)
             else:
                 try:
                     # Reply to the original message for the subsequent parts
-                    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+                    await update.message.reply_text(msg)
                 except BadRequest:
                     # Reply to the original message for the subsequent parts
                     await update.message.reply_text(msg)
     else:
-        logger.warning("Error with OpeanAI request")
+        logger.warning("Error with OpeanAI request (message response)")
         await telegram_message.edit_text('There was an error, please try again')
 
     return CHAT
