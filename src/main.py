@@ -571,13 +571,13 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[int,
                 try:
                     # Edit the original message for the first part
                     await telegram_message.edit_text(msg, parse_mode=ParseMode.MARKDOWN)
-                except BadRequest:
+                except Exception:
                     await telegram_message.edit_text(msg)
             else:
                 try:
                     # Reply to the original message for the subsequent parts
                     await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
-                except BadRequest:
+                except Exception:
                     # Reply to the original message for the subsequent parts
                     await update.message.reply_text(msg)
     else:
