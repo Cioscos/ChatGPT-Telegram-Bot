@@ -561,7 +561,7 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[int,
         start = 0
         messages = []
         while start < len(ai_response):
-            end = min(start + 4096, len(ai_response))
+            end = min(start + 3000, len(ai_response))
             messages.append(ai_response[start:end])
             start = end
 
@@ -570,13 +570,13 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[int,
             if index == 0:
                 try:
                     # Edit the original message for the first part
-                    await telegram_message.edit_text(msg)
+                    await telegram_message.edit_text(msg, parse_mode=ParseMode.MARKDOWN)
                 except BadRequest:
                     await telegram_message.edit_text(msg)
             else:
                 try:
                     # Reply to the original message for the subsequent parts
-                    await update.message.reply_text(msg)
+                    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
                 except BadRequest:
                     # Reply to the original message for the subsequent parts
                     await update.message.reply_text(msg)
