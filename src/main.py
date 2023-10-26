@@ -691,7 +691,7 @@ def main() -> None:
     my_persistence = PicklePersistence(filepath='DB')
 
     OpenAiLibWrapper.set_api_key(keyring_get('OpenAI'))
-    OpenAiLibWrapper.set_timeout(60)
+    OpenAiLibWrapper.set_timeout(180)
 
     # Initialize Application
     application = Application.builder().token(keyring_get('Telegram')).persistence(
