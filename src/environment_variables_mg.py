@@ -5,9 +5,9 @@ from typing import Union
 logger = logging.getLogger(__name__)
 
 KEYRING = {
-    'Telegram': None,
-    'DevId': None,
-    'OpenAI': None
+    'Telegram': Optional[str],
+    'DevId': Optional[str],
+    'OpenAI': Optional[str]
 }
 
 
