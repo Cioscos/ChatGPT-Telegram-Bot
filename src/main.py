@@ -4,15 +4,13 @@ import logging
 import re
 import traceback
 import uuid
+from itertools import zip_longest
 from typing import Union, List, Dict, Set, Optional
 from warnings import filterwarnings
-from itertools import zip_longest
 
-import openai
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup, User, \
     CallbackQuery
 from telegram.constants import ParseMode
-from telegram.error import BadRequest
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -24,9 +22,9 @@ from telegram.ext import (
 from telegram.warnings import PTBUserWarning
 
 from environment_variables_mg import keyring_get, keyring_initialize
+from helper import escape_markdown
 from openai_lib_wrapper import OpenAiLibWrapper
 from personality import PERSONALITIES
-from helper import escape_markdown
 
 # Setup logging
 logging.basicConfig(
