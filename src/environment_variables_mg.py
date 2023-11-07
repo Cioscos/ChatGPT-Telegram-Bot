@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import Union
+from typing import Union, Optional
 
 logger = logging.getLogger(__name__)
 
