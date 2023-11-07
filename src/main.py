@@ -120,7 +120,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return APPROVAL
 
 
-async def approval(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def approval(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Handles the approval from the dev
     """
@@ -505,16 +505,16 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[int,
 
     telegram_message = await update.message.reply_text("Thinking...")
 
-    response = OpenAiLibWrapper.chat_completition(
+    response = await OpenAiLibWrapper.chat_completition(
         model=context.user_data[USER_DATA_KEY_MODEL],
         messages=message_history,
         temperature=0.2
     )
 
-    if response['choices'][0]['finish_reason'] == 'stop':
+    if response.choices[0].finish_reason == 'stop':
 
         # Get the AI response content
-        ai_response = response['choices'][0]['message']['content']
+        ai_response = response.choices[0].message.content
         ai_message_body = {'role': 'assistant', 'content': ai_response}
 
         if not current_chat.get(USER_DATA_TITLE_CHOSEN, None):
@@ -531,15 +531,15 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[int,
                 {'role': 'user',
                  'content': title_prompt}
             ]
-            title_response = OpenAiLibWrapper.chat_completition(
+            title_response = await OpenAiLibWrapper.chat_completition(
                 model='gpt-3.5-turbo',
                 messages=title_conversation,
                 temperature=0
             )
 
-            if title_response['choices'][0]['finish_reason'] == 'stop':
+            if title_response.choices[0].finish_reason == 'stop':
                 # Get the AI response content
-                title = title_response['choices'][0]['message']['content']
+                title = title_response.choices[0].message.content
 
                 current_chat['title'] = title
 
