@@ -505,11 +505,15 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[int,
 
     telegram_message = await update.message.reply_text("Thinking...")
 
-    response = await OpenAiLibWrapper.chat_completition(
-        model=context.user_data[USER_DATA_KEY_MODEL],
-        messages=message_history,
-        temperature=0.2
-    )
+    try:
+        response = await OpenAiLibWrapper.chat_completition(
+            model=context.user_data[USER_DATA_KEY_MODEL],
+            messages=message_history,
+            temperature=0.2
+        )
+    except Exception:
+        await update.message.reply_text("There was a problem with the OpenAI API. Please try again later.")
+        return
 
     if response.choices[0].finish_reason == 'stop':
 
@@ -531,11 +535,16 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Union[int,
                 {'role': 'user',
                  'content': title_prompt}
             ]
-            title_response = await OpenAiLibWrapper.chat_completition(
-                model='gpt-3.5-turbo',
-                messages=title_conversation,
-                temperature=0
-            )
+
+            try:
+                title_response = await OpenAiLibWrapper.chat_completition(
+                    model='gpt-3.5-turbo',
+                    messages=title_conversation,
+                    temperature=0
+                )
+            except Exception:
+                await update.message.reply_text("There was a problem with the OpenAI API. Please try again later.")
+                return
 
             if title_response.choices[0].finish_reason == 'stop':
                 # Get the AI response content
