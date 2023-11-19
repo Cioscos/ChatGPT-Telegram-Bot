@@ -686,6 +686,12 @@ def filter_approval(data: Union[str, object]) -> bool:
     return re.match(r'callback_data-approval-(ok|notok)', data) is not None
 
 
+async def post_stop_callback(application: Application) -> None:
+    chat_ids = application.bot_data.get(BOT_DATA_APPROVED_USERS)
+    for chat_id in chat_ids:
+        await application.bot.send_message(chat_id, "🔴 The bot was switched off... someone switched off the power 🔴")
+
+
 def main() -> None:
     # Initialize the keyring
     if not keyring_initialize():
@@ -698,7 +704,7 @@ def main() -> None:
     OpenAiLibWrapper.set_timeout(180)
 
     # Initialize Application
-    application = Application.builder().token(keyring_get('Telegram')).persistence(
+    application = Application.builder().token(keyring_get('Telegram')).post_stop(post_stop_callback).persistence(
         persistence=my_persistence).concurrent_updates(True).build()
 
     # Assign an error handler
